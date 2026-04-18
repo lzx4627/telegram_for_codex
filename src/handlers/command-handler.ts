@@ -200,27 +200,6 @@ Session:
         await sessionDb.deactivateSession(session.id);
       }
 
-      const restoredSession = await sessionDb.getLatestRestorableSessionByCwd(nextPath);
-      if (restoredSession?.assistant_session_id) {
-        await sessionDb.createSession({
-          conversation_id: conversation.id,
-          ai_assistant_type: 'codex',
-          assistant_session_id: restoredSession.assistant_session_id,
-          cwd_snapshot: nextPath,
-          metadata: {
-            resumeSource: 'cwd-history',
-            resumedFromAssistantSessionId: restoredSession.assistant_session_id,
-            resumedFromConversationId: restoredSession.conversation_id,
-          },
-        });
-
-        return {
-          success: true,
-          modified: true,
-          message: `Bound topic to: ${nextPath}\nRecovered historical session: ${restoredSession.assistant_session_id}\nResume source: machine-wide cwd history`,
-        };
-      }
-
       const globalSession = findLatestGlobalSessionByCwd(nextPath);
       if (globalSession) {
         await sessionDb.createSession({
@@ -239,6 +218,27 @@ Session:
           success: true,
           modified: true,
           message: `Bound topic to: ${nextPath}\nRecovered historical session: ${globalSession.sessionId}\nResume source: machine-wide Codex session history`,
+        };
+      }
+
+      const restoredSession = await sessionDb.getLatestRestorableSessionByCwd(nextPath);
+      if (restoredSession?.assistant_session_id) {
+        await sessionDb.createSession({
+          conversation_id: conversation.id,
+          ai_assistant_type: 'codex',
+          assistant_session_id: restoredSession.assistant_session_id,
+          cwd_snapshot: nextPath,
+          metadata: {
+            resumeSource: 'cwd-history',
+            resumedFromAssistantSessionId: restoredSession.assistant_session_id,
+            resumedFromConversationId: restoredSession.conversation_id,
+          },
+        });
+
+        return {
+          success: true,
+          modified: true,
+          message: `Bound topic to: ${nextPath}\nRecovered historical session: ${restoredSession.assistant_session_id}\nResume source: machine-wide cwd history`,
         };
       }
 

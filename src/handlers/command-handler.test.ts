@@ -219,6 +219,10 @@ describe('CommandHandler', () => {
     });
 
     test('restores the latest machine-wide session for the bound cwd', async () => {
+      const codexClient = jest.requireMock('../clients/codex') as {
+        findLatestGlobalSessionByCwd: jest.Mock;
+      };
+
       (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({ id: 'session-1' });
       (sessionDb.getLatestRestorableSessionByCwd as jest.Mock).mockResolvedValue({
         id: 'historic-row',
@@ -226,6 +230,7 @@ describe('CommandHandler', () => {
         assistant_session_id: 'codex-thread-9',
         metadata: {},
       });
+      codexClient.findLatestGlobalSessionByCwd.mockReturnValue(null);
 
       const result = await handleCommand(baseConversation, '/bind /tmp/repo-b', {
         lockManager: new ConversationLockManager(10),
@@ -244,6 +249,42 @@ describe('CommandHandler', () => {
       });
       expect(result.message).toContain('Recovered historical session: codex-thread-9');
       expect(result.message).toContain('Resume source: machine-wide cwd history');
+    });
+
+    test('prefers global codex session history over database history for the same cwd', async () => {
+      const codexClient = jest.requireMock('../clients/codex') as {
+        findLatestGlobalSessionByCwd: jest.Mock;
+      };
+
+      (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({ id: 'session-1' });
+      (sessionDb.getLatestRestorableSessionByCwd as jest.Mock).mockResolvedValue({
+        id: 'historic-row',
+        conversation_id: 'conv-9',
+        assistant_session_id: 'db-session-9',
+        metadata: {},
+      });
+      codexClient.findLatestGlobalSessionByCwd.mockReturnValue({
+        sessionId: 'global-root-session',
+        timestamp: '2026-04-18T12:00:00.000Z',
+      });
+
+      const result = await handleCommand(baseConversation, '/bind /tmp/repo-priority', {
+        lockManager: new ConversationLockManager(10),
+      });
+
+      expect(sessionDb.createSession).toHaveBeenCalledWith({
+        conversation_id: 'conv-1',
+        ai_assistant_type: 'codex',
+        assistant_session_id: 'global-root-session',
+        cwd_snapshot: '/tmp/repo-priority',
+        metadata: {
+          resumeSource: 'codex-global-history',
+          resumedFromAssistantSessionId: 'global-root-session',
+          resumedFromConversationId: null,
+        },
+      });
+      expect(result.message).toContain('Recovered historical session: global-root-session');
+      expect(result.message).toContain('Resume source: machine-wide Codex session history');
     });
 
     test('falls back to global codex session history when database history is missing', async () => {

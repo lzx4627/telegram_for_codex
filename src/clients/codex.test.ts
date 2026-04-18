@@ -110,4 +110,53 @@ describe('CodexClient', () => {
 
     rmSync(root, { recursive: true, force: true });
   });
+
+  test('prefers a top-level session over a newer subagent session for the same cwd', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codex-sessions-'));
+    const sessionDir = join(root, '2026', '04', '18');
+    mkdirSync(sessionDir, { recursive: true });
+
+    writeFileSync(
+      join(sessionDir, 'root.jsonl'),
+      `${JSON.stringify({
+        timestamp: '2026-04-18T10:00:00.000Z',
+        type: 'session_meta',
+        payload: {
+          id: 'root-session',
+          timestamp: '2026-04-18T10:00:00.000Z',
+          cwd: '/opt/github_trend_report',
+          source: {},
+        },
+      })}\n`,
+      'utf8'
+    );
+
+    writeFileSync(
+      join(sessionDir, 'child.jsonl'),
+      `${JSON.stringify({
+        timestamp: '2026-04-18T11:00:00.000Z',
+        type: 'session_meta',
+        payload: {
+          id: 'child-session',
+          timestamp: '2026-04-18T11:00:00.000Z',
+          cwd: '/opt/github_trend_report',
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: 'root-session',
+              },
+            },
+          },
+        },
+      })}\n`,
+      'utf8'
+    );
+
+    expect(findLatestGlobalSessionByCwd('/opt/github_trend_report', root)).toEqual({
+      sessionId: 'root-session',
+      timestamp: '2026-04-18T10:00:00.000Z',
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
 });

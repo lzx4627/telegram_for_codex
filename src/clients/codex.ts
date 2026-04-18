@@ -51,7 +51,8 @@ export function findLatestGlobalSessionByCwd(
   sessionsRoot = join(homedir(), '.codex', 'sessions')
 ): { sessionId: string; timestamp: string } | null {
   const stack = [sessionsRoot];
-  let latest: { sessionId: string; timestamp: string } | null = null;
+  let latestTopLevel: { sessionId: string; timestamp: string } | null = null;
+  let latestAny: { sessionId: string; timestamp: string } | null = null;
 
   while (stack.length > 0) {
     const current = stack.pop();
@@ -92,18 +93,39 @@ export function findLatestGlobalSessionByCwd(
 
       try {
         const parsed = JSON.parse(sessionMetaLine) as {
-          payload?: { id?: string; timestamp?: string; cwd?: string };
+          payload?: {
+            id?: string;
+            timestamp?: string;
+            cwd?: string;
+            source?: {
+              subagent?: {
+                thread_spawn?: {
+                  parent_thread_id?: string;
+                };
+              };
+            };
+          };
         };
         if (
           parsed.payload?.cwd === cwd &&
           parsed.payload.id &&
-          parsed.payload.timestamp &&
-          (!latest || parsed.payload.timestamp > latest.timestamp)
+          parsed.payload.timestamp
         ) {
-          latest = {
+          const candidate = {
             sessionId: parsed.payload.id,
             timestamp: parsed.payload.timestamp,
           };
+
+          if (!latestAny || candidate.timestamp > latestAny.timestamp) {
+            latestAny = candidate;
+          }
+
+          const isSubagentSession = Boolean(
+            parsed.payload.source?.subagent?.thread_spawn?.parent_thread_id
+          );
+          if (!isSubagentSession && (!latestTopLevel || candidate.timestamp > latestTopLevel.timestamp)) {
+            latestTopLevel = candidate;
+          }
         }
       } catch {
         continue;
@@ -111,7 +133,7 @@ export function findLatestGlobalSessionByCwd(
     }
   }
 
-  return latest;
+  return latestTopLevel ?? latestAny;
 }
 
 function readCodexConfigToml(): string | undefined {
