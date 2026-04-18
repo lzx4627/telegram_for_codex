@@ -56,7 +56,8 @@ export function parseCommand(text: string): { command: string; args: string[] } 
     return { command: '', args: [] };
   }
 
-  const command = matches[0].substring(1); // Remove leading '/'
+  const rawCommand = matches[0].substring(1); // Remove leading '/'
+  const command = rawCommand.split('@')[0] || '';
   const args = matches.slice(1).map(arg => {
     // Remove surrounding quotes if present
     if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {

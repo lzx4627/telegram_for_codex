@@ -80,6 +80,18 @@ describe('CommandHandler', () => {
       expect(result.args).toEqual([]);
     });
 
+    test('should strip telegram bot mention suffix from /status command', () => {
+      const result = parseCommand('/status@remote_agentic_bot');
+      expect(result.command).toBe('status');
+      expect(result.args).toEqual([]);
+    });
+
+    test('should strip telegram bot mention suffix from /help command', () => {
+      const result = parseCommand('/help@remote_agentic_bot');
+      expect(result.command).toBe('help');
+      expect(result.args).toEqual([]);
+    });
+
     test('should handle /setcwd with path containing spaces', () => {
       const result = parseCommand('/setcwd /workspace/my repo');
       expect(result.command).toBe('setcwd');
