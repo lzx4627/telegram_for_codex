@@ -2,11 +2,16 @@
  * Codex SDK wrapper
  * Provides async generator interface for streaming Codex responses
  */
+import { readFileSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 import { IAssistantClient, MessageChunk } from '../types';
 
 // Type definition for Codex SDK (ESM import)
 type CodexSDK = typeof import('@openai/codex-sdk');
 type Codex = InstanceType<CodexSDK['Codex']>;
+type CodexOptions = ConstructorParameters<CodexSDK['Codex']>[0];
+type ThreadOptions = Parameters<Codex['startThread']>[0];
 
 // Singleton Codex instance
 let codexInstance: Codex | null = null;
@@ -16,6 +21,69 @@ let codexClass: CodexSDK['Codex'] | null = null;
 // This prevents TS from converting import() to require() when module=commonjs
 // eslint-disable-next-line @typescript-eslint/no-implied-eval
 const importDynamic = new Function('modulePath', 'return import(modulePath)');
+const SUPPORTED_REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
+
+export function normalizeModelReasoningEffort(
+  value?: string | null
+): 'minimal' | 'low' | 'medium' | 'high' | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'xhigh') {
+    return 'high';
+  }
+
+  if (SUPPORTED_REASONING_EFFORTS.has(normalized)) {
+    return normalized as 'minimal' | 'low' | 'medium' | 'high';
+  }
+
+  return undefined;
+}
+
+function readCodexConfigToml(): string | undefined {
+  try {
+    return readFileSync(join(homedir(), '.codex', 'config.toml'), 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function extractConfigReasoningEffort(configText?: string): string | undefined {
+  if (!configText) {
+    return undefined;
+  }
+
+  const match = /^\s*model_reasoning_effort\s*=\s*"([^"]+)"/m.exec(configText);
+  return match?.[1];
+}
+
+export function buildCodexOptionsFromEnv(): CodexOptions | undefined {
+  const baseUrl = process.env.CODEX_BASE_URL ?? process.env.OPENAI_BASE_URL;
+  const apiKey = process.env.OPENAI_API_KEY ?? process.env.CODEX_API_KEY;
+
+  if (!baseUrl && !apiKey) {
+    return undefined;
+  }
+
+  return {
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(apiKey ? { apiKey } : {}),
+  };
+}
+
+export function buildThreadOptions(cwd: string): ThreadOptions {
+  const rawReasoningEffort =
+    process.env.CODEX_MODEL_REASONING_EFFORT ?? extractConfigReasoningEffort(readCodexConfigToml());
+  const modelReasoningEffort = normalizeModelReasoningEffort(rawReasoningEffort);
+
+  return {
+    workingDirectory: cwd,
+    skipGitRepoCheck: true,
+    ...(modelReasoningEffort ? { modelReasoningEffort } : {}),
+  };
+}
 
 /**
  * Get or create Codex SDK instance (uses dynamic import for ESM compatibility)
@@ -28,8 +96,9 @@ async function getCodex(): Promise<Codex> {
       const { Codex: ImportedCodex } = await importDynamic('@openai/codex-sdk') as CodexSDK;
       codexClass = ImportedCodex;
     }
-     
-    codexInstance = new codexClass();
+
+    const options = buildCodexOptionsFromEnv();
+    codexInstance = options ? new codexClass(options) : new codexClass();
   }
   return codexInstance;
 }
@@ -59,25 +128,16 @@ export class CodexClient implements IAssistantClient {
       try {
         // NOTE: resumeThread is synchronous, not async
         // IMPORTANT: Must pass options when resuming!
-        thread = codex.resumeThread(resumeSessionId, {
-          workingDirectory: cwd,
-          skipGitRepoCheck: true,
-        });
+        thread = codex.resumeThread(resumeSessionId, buildThreadOptions(cwd));
       } catch (error) {
         console.error(`[Codex] Failed to resume thread ${resumeSessionId}, creating new one:`, error);
         // Fall back to creating new thread
-        thread = codex.startThread({
-          workingDirectory: cwd,
-          skipGitRepoCheck: true,
-        });
+        thread = codex.startThread(buildThreadOptions(cwd));
       }
     } else {
       console.log(`[Codex] Starting new thread in ${cwd}`);
       // NOTE: startThread is synchronous, not async
-      thread = codex.startThread({
-        workingDirectory: cwd,
-        skipGitRepoCheck: true,
-      });
+      thread = codex.startThread(buildThreadOptions(cwd));
     }
 
     try {

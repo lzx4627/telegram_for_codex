@@ -1,23 +1,51 @@
 /**
- * Placeholder tests for Codex client
- * Full integration tests require real API credentials and are run manually
+ * Unit tests for Codex client helpers
  */
+import {
+  buildCodexOptionsFromEnv,
+  buildThreadOptions,
+  normalizeModelReasoningEffort,
+} from './codex';
 
 describe('CodexClient', () => {
-  test('placeholder - integration tests require real Codex SDK and API', () => {
-    // Integration tests for Codex client require:
-    // 1. Valid CODEX_ID_TOKEN, CODEX_ACCESS_TOKEN, CODEX_REFRESH_TOKEN, CODEX_ACCOUNT_ID
-    // 2. Working directory with code
-    // 3. Manual verification of streaming behavior and turn.completed handling
-    //
-    // Run manual integration tests with:
-    // npm run dev (start the bot and test via Telegram with a Codex-configured codebase)
-    expect(true).toBe(true);
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
   });
 
-  // TODO: Add comprehensive tests with mocked SDK
-  // - Thread creation and resumption
-  // - Event mapping (item.completed → MessageChunk)
-  // - turn.completed handling (critical break statement)
-  // - Error scenarios (thread resume failure, stream errors)
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  test('normalizes xhigh reasoning effort to high', () => {
+    expect(normalizeModelReasoningEffort('xhigh')).toBe('high');
+  });
+
+  test('preserves supported reasoning effort values', () => {
+    expect(normalizeModelReasoningEffort('minimal')).toBe('minimal');
+    expect(normalizeModelReasoningEffort('low')).toBe('low');
+    expect(normalizeModelReasoningEffort('medium')).toBe('medium');
+    expect(normalizeModelReasoningEffort('high')).toBe('high');
+  });
+
+  test('builds codex options from provider base url and key env vars', () => {
+    process.env.CODEX_BASE_URL = 'http://127.0.0.1:8080/v1';
+    process.env.OPENAI_API_KEY = 'test-key';
+
+    expect(buildCodexOptionsFromEnv()).toEqual({
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      apiKey: 'test-key',
+    });
+  });
+
+  test('builds thread options with normalized reasoning effort', () => {
+    process.env.CODEX_MODEL_REASONING_EFFORT = 'xhigh';
+
+    expect(buildThreadOptions('/tmp/project')).toEqual({
+      modelReasoningEffort: 'high',
+      skipGitRepoCheck: true,
+      workingDirectory: '/tmp/project',
+    });
+  });
 });

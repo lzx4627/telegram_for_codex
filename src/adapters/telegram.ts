@@ -7,6 +7,15 @@ import { IPlatformAdapter, PlatformMessageTarget, TelegramConversationContext } 
 import { getTelegramConversationContext } from './telegram-context';
 
 const MAX_LENGTH = 4096;
+const TELEGRAM_COMMANDS = [
+  { command: 'help', description: 'Show available commands' },
+  { command: 'topic', description: 'Create a new business topic from General' },
+  { command: 'topics', description: 'List business topics and bound paths' },
+  { command: 'bind', description: 'Bind the current topic to an absolute path' },
+  { command: 'pwd', description: 'Show the current bound path' },
+  { command: 'status', description: 'Show queue and session state' },
+  { command: 'reset', description: 'Reset the active Codex session' },
+] as const;
 
 export class TelegramAdapter implements IPlatformAdapter {
   private bot: Telegraf;
@@ -118,6 +127,7 @@ export class TelegramAdapter implements IPlatformAdapter {
    * Start the bot (begins polling)
    */
   async start(): Promise<void> {
+    await this.bot.telegram.setMyCommands([...TELEGRAM_COMMANDS]);
     // Drop pending updates on startup to prevent reprocessing messages after container restart
     // This ensures a clean slate - old unprocessed messages won't be handled
     await this.bot.launch({

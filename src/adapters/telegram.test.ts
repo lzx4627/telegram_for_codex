@@ -66,4 +66,29 @@ describe('TelegramAdapter', () => {
       expect(createForumTopicMock).toHaveBeenCalledWith(-1001234567890, 'repo-a');
     });
   });
+
+  describe('command registration', () => {
+    test('registers slash commands when the bot starts', async () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const launchMock = jest.spyOn(adapter.getBot(), 'launch').mockResolvedValue(undefined as never);
+      const setMyCommandsMock = jest
+        .spyOn(adapter.getBot().telegram, 'setMyCommands')
+        .mockResolvedValue(true as never);
+
+      await adapter.start();
+
+      expect(launchMock).toHaveBeenCalledWith({
+        dropPendingUpdates: true,
+      });
+      expect(setMyCommandsMock).toHaveBeenCalledWith([
+        { command: 'help', description: 'Show available commands' },
+        { command: 'topic', description: 'Create a new business topic from General' },
+        { command: 'topics', description: 'List business topics and bound paths' },
+        { command: 'bind', description: 'Bind the current topic to an absolute path' },
+        { command: 'pwd', description: 'Show the current bound path' },
+        { command: 'status', description: 'Show queue and session state' },
+        { command: 'reset', description: 'Reset the active Codex session' },
+      ]);
+    });
+  });
 });
