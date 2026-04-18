@@ -10,7 +10,7 @@ import { Conversation, CommandResult, RuntimeServices } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
-import { getCodexStatusProfile } from '../clients/codex';
+import { findLatestGlobalSessionByCwd, getCodexStatusProfile } from '../clients/codex';
 
 const execAsync = promisify(exec);
 
@@ -218,6 +218,27 @@ Session:
           success: true,
           modified: true,
           message: `Bound topic to: ${nextPath}\nRecovered historical session: ${restoredSession.assistant_session_id}\nResume source: machine-wide cwd history`,
+        };
+      }
+
+      const globalSession = findLatestGlobalSessionByCwd(nextPath);
+      if (globalSession) {
+        await sessionDb.createSession({
+          conversation_id: conversation.id,
+          ai_assistant_type: 'codex',
+          assistant_session_id: globalSession.sessionId,
+          cwd_snapshot: nextPath,
+          metadata: {
+            resumeSource: 'codex-global-history',
+            resumedFromAssistantSessionId: globalSession.sessionId,
+            resumedFromConversationId: null,
+          },
+        });
+
+        return {
+          success: true,
+          modified: true,
+          message: `Bound topic to: ${nextPath}\nRecovered historical session: ${globalSession.sessionId}\nResume source: machine-wide Codex session history`,
         };
       }
 

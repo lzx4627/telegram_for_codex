@@ -2,7 +2,7 @@
  * Codex SDK wrapper
  * Provides async generator interface for streaming Codex responses
  */
-import { readFileSync } from 'fs';
+import { Dirent, readFileSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { IAssistantClient, MessageChunk } from '../types';
@@ -44,6 +44,74 @@ export function normalizeModelReasoningEffort(
 
 export function formatResumeFallbackNotice(sessionId: string): string {
   return `Resume failed for recovered session ${sessionId}. Started a fresh session instead.`;
+}
+
+export function findLatestGlobalSessionByCwd(
+  cwd: string,
+  sessionsRoot = join(homedir(), '.codex', 'sessions')
+): { sessionId: string; timestamp: string } | null {
+  const stack = [sessionsRoot];
+  let latest: { sessionId: string; timestamp: string } | null = null;
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const nextPath = join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(nextPath);
+        continue;
+      }
+
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
+        continue;
+      }
+
+      let content: string;
+      try {
+        content = readFileSync(nextPath, 'utf8');
+      } catch {
+        continue;
+      }
+
+      const lines = content.split('\n').filter(Boolean);
+      const sessionMetaLine = lines.find(line => line.includes('"type":"session_meta"'));
+      if (!sessionMetaLine) {
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(sessionMetaLine) as {
+          payload?: { id?: string; timestamp?: string; cwd?: string };
+        };
+        if (
+          parsed.payload?.cwd === cwd &&
+          parsed.payload.id &&
+          parsed.payload.timestamp &&
+          (!latest || parsed.payload.timestamp > latest.timestamp)
+        ) {
+          latest = {
+            sessionId: parsed.payload.id,
+            timestamp: parsed.payload.timestamp,
+          };
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return latest;
 }
 
 function readCodexConfigToml(): string | undefined {

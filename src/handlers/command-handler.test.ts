@@ -35,6 +35,7 @@ jest.mock('../clients/codex', () => ({
     configuredReasoningEffort: 'xhigh',
     effectiveReasoningEffort: 'high',
   })),
+  findLatestGlobalSessionByCwd: jest.fn(() => null),
 }));
 
 import { mkdir } from 'fs/promises';
@@ -243,6 +244,37 @@ describe('CommandHandler', () => {
       });
       expect(result.message).toContain('Recovered historical session: codex-thread-9');
       expect(result.message).toContain('Resume source: machine-wide cwd history');
+    });
+
+    test('falls back to global codex session history when database history is missing', async () => {
+      const codexClient = jest.requireMock('../clients/codex') as {
+        findLatestGlobalSessionByCwd: jest.Mock;
+      };
+
+      (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({ id: 'session-1' });
+      (sessionDb.getLatestRestorableSessionByCwd as jest.Mock).mockResolvedValue(null);
+      codexClient.findLatestGlobalSessionByCwd.mockReturnValue({
+        sessionId: 'global-session-7',
+        timestamp: '2026-04-18T10:21:53.699Z',
+      });
+
+      const result = await handleCommand(baseConversation, '/bind /tmp/repo-c', {
+        lockManager: new ConversationLockManager(10),
+      });
+
+      expect(sessionDb.createSession).toHaveBeenCalledWith({
+        conversation_id: 'conv-1',
+        ai_assistant_type: 'codex',
+        assistant_session_id: 'global-session-7',
+        cwd_snapshot: '/tmp/repo-c',
+        metadata: {
+          resumeSource: 'codex-global-history',
+          resumedFromAssistantSessionId: 'global-session-7',
+          resumedFromConversationId: null,
+        },
+      });
+      expect(result.message).toContain('Recovered historical session: global-session-7');
+      expect(result.message).toContain('Resume source: machine-wide Codex session history');
     });
 
     test('rejects relative bind targets', async () => {
