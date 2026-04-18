@@ -14,6 +14,7 @@ import { GitHubAdapter } from './adapters/github';
 import { handleMessage } from './orchestrator/orchestrator';
 import { pool } from './db/connection';
 import { ConversationLockManager } from './utils/conversation-lock';
+import { handleGeneralTopicCommand } from './handlers/general-topic-handler';
 
 async function main(): Promise<void> {
   console.log('[App] Starting Remote Coding Agent (Telegram + Claude MVP)');
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
   // Initialize conversation lock manager
   const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_CONVERSATIONS || '10');
   const lockManager = new ConversationLockManager(maxConcurrent);
+  const runtime = { lockManager };
   console.log(`[App] Lock manager initialized (max concurrent: ${maxConcurrent})`);
 
   // Initialize test adapter
@@ -175,19 +177,48 @@ async function main(): Promise<void> {
 
   // Handle text messages
   telegram.getBot().on('text', async ctx => {
-    const conversationId = telegram.getConversationId(ctx);
+    const context = telegram.getConversationContext(ctx);
+    const target = {
+      conversationId: context.conversationId,
+      chatId: context.chatId,
+      threadId: context.threadId,
+    };
     const message = ctx.message.text;
 
     if (!message) return;
 
-    // Fire-and-forget: handler returns immediately, processing happens async
-    lockManager
-      .acquireLock(conversationId, async () => {
-        await handleMessage(telegram, conversationId, message);
-      })
-      .catch(error => {
-        console.error('[Telegram] Failed to process message:', error);
+    if (context.isGeneral) {
+      if (!message.startsWith('/')) {
+        return;
+      }
+
+      try {
+        const result = await handleGeneralTopicCommand(telegram, context, message, runtime);
+        await telegram.sendMessage(target, result.message);
+      } catch (error) {
+        console.error('[Telegram] Failed to process General command:', error);
+      }
+      return;
+    }
+
+    if (!context.isBusinessTopic) {
+      return;
+    }
+
+    try {
+      const lockResult = await lockManager.acquireLock(context.conversationId, async () => {
+        await handleMessage(telegram, context.conversationId, message);
       });
+
+      if (lockResult.disposition === 'queued') {
+        await telegram.sendMessage(
+          target,
+          `[system] queued (${lockResult.queueLength} waiting in this topic)`
+        );
+      }
+    } catch (error) {
+      console.error('[Telegram] Failed to process message:', error);
+    }
   });
 
   // Start bot
