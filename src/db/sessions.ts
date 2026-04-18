@@ -12,6 +12,18 @@ export async function getActiveSession(conversationId: string): Promise<Session 
   return result.rows[0] || null;
 }
 
+export async function getLatestSession(conversationId: string): Promise<Session | null> {
+  const result = await pool.query<Session>(
+    `SELECT *
+       FROM remote_agent_sessions
+      WHERE conversation_id = $1
+      ORDER BY COALESCE(ended_at, started_at) DESC
+      LIMIT 1`,
+    [conversationId]
+  );
+  return result.rows[0] || null;
+}
+
 export async function createSession(data: {
   conversation_id: string;
   codebase_id?: string;

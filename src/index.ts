@@ -7,6 +7,9 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+import { access } from 'fs/promises';
+import { homedir } from 'os';
+import { join } from 'path';
 import express from 'express';
 import { TelegramAdapter } from './adapters/telegram';
 import { TestAdapter } from './adapters/test';
@@ -14,9 +17,29 @@ import { GitHubAdapter } from './adapters/github';
 import { handleMessage } from './orchestrator/orchestrator';
 import { pool } from './db/connection';
 import { ConversationLockManager } from './utils/conversation-lock';
+import { handleGeneralTopicCommand } from './handlers/general-topic-handler';
+
+async function hasCodexAuth(): Promise<boolean> {
+  if (
+    process.env.OPENAI_API_KEY ||
+    (process.env.CODEX_ID_TOKEN &&
+      process.env.CODEX_ACCESS_TOKEN &&
+      process.env.CODEX_REFRESH_TOKEN &&
+      process.env.CODEX_ACCOUNT_ID)
+  ) {
+    return true;
+  }
+
+  try {
+    await access(join(homedir(), '.codex', 'auth.json'));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function main(): Promise<void> {
-  console.log('[App] Starting Remote Coding Agent (Telegram + Claude MVP)');
+  console.log('[App] Starting Remote Coding Agent (Telegram + Codex)');
 
   // Validate required environment variables
   const required = ['DATABASE_URL', 'TELEGRAM_BOT_TOKEN'];
@@ -27,20 +50,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Validate AI assistant credentials (warn if missing, don't fail)
-  const hasClaudeCredentials = process.env.CLAUDE_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  const hasCodexCredentials = process.env.CODEX_ID_TOKEN && process.env.CODEX_ACCESS_TOKEN;
-
-  if (!hasClaudeCredentials && !hasCodexCredentials) {
-    console.error('[App] No AI assistant credentials found. Set Claude or Codex credentials.');
+  if (!(await hasCodexAuth())) {
+    console.error(
+      '[App] Codex authentication missing. Run codex login or provide OPENAI_API_KEY / CODEX_* credentials.'
+    );
     process.exit(1);
-  }
-
-  if (!hasClaudeCredentials) {
-    console.warn('[App] Claude credentials not found. Claude assistant will be unavailable.');
-  }
-  if (!hasCodexCredentials) {
-    console.warn('[App] Codex credentials not found. Codex assistant will be unavailable.');
   }
 
   // Test database connection
@@ -55,6 +69,7 @@ async function main(): Promise<void> {
   // Initialize conversation lock manager
   const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_CONVERSATIONS || '10');
   const lockManager = new ConversationLockManager(maxConcurrent);
+  const runtime = { lockManager };
   console.log(`[App] Lock manager initialized (max concurrent: ${maxConcurrent})`);
 
   // Initialize test adapter
@@ -138,15 +153,38 @@ async function main(): Promise<void> {
       }
 
       await testAdapter.receiveMessage(conversationId, message);
+      const [, chatId, threadPart] = String(conversationId).split(':');
+      const threadId = threadPart === 'general' || !threadPart ? null : Number(threadPart);
+      const context = {
+        platformType: 'telegram' as const,
+        conversationId: String(conversationId),
+        chatId: chatId || String(conversationId),
+        threadId,
+        topicName: threadId == null ? null : `topic-${threadId}`,
+        isGeneral: threadId == null,
+        isBusinessTopic: threadId != null,
+      };
 
-      // Process the message through orchestrator (non-blocking)
-      lockManager
-        .acquireLock(conversationId, async () => {
-          await handleMessage(testAdapter, conversationId, message);
-        })
-        .catch(error => {
-          console.error('[Test] Message handling error:', error);
+      if (context.isGeneral) {
+        if (String(message).startsWith('/')) {
+          const result = await handleGeneralTopicCommand(telegram, context, String(message), runtime);
+          await testAdapter.sendMessage(
+            { conversationId: context.conversationId, chatId: context.chatId, threadId: context.threadId },
+            result.message
+          );
+        }
+      } else {
+        const lockResult = await lockManager.acquireLock(context.conversationId, async () => {
+          await handleMessage(testAdapter, context, String(message), runtime);
         });
+
+        if (lockResult.disposition === 'queued') {
+          await testAdapter.sendMessage(
+            { conversationId: context.conversationId, chatId: context.chatId, threadId: context.threadId },
+            `[system] queued (${lockResult.queueLength} waiting in this topic)`
+          );
+        }
+      }
 
       return res.json({ success: true, conversationId, message });
     } catch (error) {
@@ -175,19 +213,48 @@ async function main(): Promise<void> {
 
   // Handle text messages
   telegram.getBot().on('text', async ctx => {
-    const conversationId = telegram.getConversationId(ctx);
+    const context = telegram.getConversationContext(ctx);
+    const target = {
+      conversationId: context.conversationId,
+      chatId: context.chatId,
+      threadId: context.threadId,
+    };
     const message = ctx.message.text;
 
     if (!message) return;
 
-    // Fire-and-forget: handler returns immediately, processing happens async
-    lockManager
-      .acquireLock(conversationId, async () => {
-        await handleMessage(telegram, conversationId, message);
-      })
-      .catch(error => {
-        console.error('[Telegram] Failed to process message:', error);
+    if (context.isGeneral) {
+      if (!message.startsWith('/')) {
+        return;
+      }
+
+      try {
+        const result = await handleGeneralTopicCommand(telegram, context, message, runtime);
+        await telegram.sendMessage(target, result.message);
+      } catch (error) {
+        console.error('[Telegram] Failed to process General command:', error);
+      }
+      return;
+    }
+
+    if (!context.isBusinessTopic) {
+      return;
+    }
+
+    try {
+      const lockResult = await lockManager.acquireLock(context.conversationId, async () => {
+        await handleMessage(telegram, context, message, runtime);
       });
+
+      if (lockResult.disposition === 'queued') {
+        await telegram.sendMessage(
+          target,
+          `[system] queued (${lockResult.queueLength} waiting in this topic)`
+        );
+      }
+    } catch (error) {
+      console.error('[Telegram] Failed to process message:', error);
+    }
   });
 
   // Start bot

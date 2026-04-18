@@ -15,6 +15,11 @@ interface QueuedMessage {
   timestamp: number;
 }
 
+export interface AcquireLockResult {
+  disposition: 'started' | 'queued';
+  queueLength: number;
+}
+
 /**
  * Manages conversation locks for concurrent message processing
  */
@@ -40,18 +45,27 @@ export class ConversationLockManager {
    * @param conversationId - Unique conversation identifier
    * @param handler - Async function to execute
    */
-  async acquireLock(conversationId: string, handler: () => Promise<void>): Promise<void> {
+  async acquireLock(
+    conversationId: string,
+    handler: () => Promise<void>
+  ): Promise<AcquireLockResult> {
     // Check if conversation already active - queue if yes
     if (this.activeConversations.has(conversationId)) {
       this.queueMessage(conversationId, handler);
-      return;
+      return {
+        disposition: 'queued',
+        queueLength: this.messageQueues.get(conversationId)?.length ?? 0,
+      };
     }
 
     // Check if at max capacity - queue if yes
     if (this.activeConversations.size >= this.maxConcurrent) {
       console.log(`[ConversationLock] At max capacity (${this.maxConcurrent}), queuing ${conversationId}`);
       this.queueMessage(conversationId, handler);
-      return;
+      return {
+        disposition: 'queued',
+        queueLength: this.messageQueues.get(conversationId)?.length ?? 0,
+      };
     }
 
     // Execute immediately
@@ -87,6 +101,10 @@ export class ConversationLockManager {
     this.activeConversations.set(conversationId, promise);
 
     // Fire-and-forget: don't await here, return immediately
+    return {
+      disposition: 'started',
+      queueLength: this.messageQueues.get(conversationId)?.length ?? 0,
+    };
   }
 
   /**
@@ -163,6 +181,24 @@ export class ConversationLockManager {
    */
   private getQueuedCount(): number {
     return Array.from(this.messageQueues.values()).reduce((sum, q) => sum + q.length, 0);
+  }
+
+  /**
+   * Get runtime state for a single conversation.
+   */
+  getConversationState(conversationId: string): {
+    state: 'idle' | 'queued' | 'running';
+    isActive: boolean;
+    queueLength: number;
+  } {
+    const isActive = this.activeConversations.has(conversationId);
+    const queueLength = this.messageQueues.get(conversationId)?.length ?? 0;
+
+    return {
+      state: isActive ? 'running' : queueLength > 0 ? 'queued' : 'idle',
+      isActive,
+      queueLength,
+    };
   }
 
   /**

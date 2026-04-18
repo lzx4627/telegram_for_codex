@@ -202,4 +202,45 @@ describe('ConversationLockManager', () => {
     // Wait for completion
     await new Promise(resolve => setTimeout(resolve, 100));
   });
+
+  test('returns queued when the same topic is already active', async () => {
+    const manager = new ConversationLockManager(10);
+    let releaseFirst!: () => void;
+
+    const firstPromise = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+
+    const first = await manager.acquireLock('telegram:-1001234567890:42', async () => firstPromise);
+    const second = await manager.acquireLock('telegram:-1001234567890:42', async () => {});
+
+    expect(first).toEqual({ disposition: 'started', queueLength: 0 });
+    expect(second).toEqual({ disposition: 'queued', queueLength: 1 });
+
+    releaseFirst();
+    await firstPromise;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
+
+  test('reports running state and queue length for one topic', async () => {
+    const manager = new ConversationLockManager(10);
+    let releaseFirst!: () => void;
+
+    const firstPromise = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+
+    await manager.acquireLock('telegram:-1001234567890:42', async () => firstPromise);
+    await manager.acquireLock('telegram:-1001234567890:42', async () => {});
+
+    expect(manager.getConversationState('telegram:-1001234567890:42')).toEqual({
+      state: 'running',
+      isActive: true,
+      queueLength: 1,
+    });
+
+    releaseFirst();
+    await firstPromise;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
 });

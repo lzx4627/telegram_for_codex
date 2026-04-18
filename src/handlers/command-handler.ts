@@ -4,9 +4,9 @@
  */
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { readFile, writeFile, readdir, access } from 'fs/promises';
-import { join, basename } from 'path';
-import { Conversation, CommandResult } from '../types';
+import { readFile, writeFile, readdir, access, mkdir } from 'fs/promises';
+import { join, basename, isAbsolute } from 'path';
+import { Conversation, CommandResult, RuntimeServices } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
@@ -69,12 +69,28 @@ export function parseCommand(text: string): { command: string; args: string[] } 
 
 export async function handleCommand(
   conversation: Conversation,
-  message: string
+  message: string,
+  runtime?: RuntimeServices
 ): Promise<CommandResult> {
   const { command, args } = parseCommand(message);
 
+  const isTelegramBusinessTopic =
+    conversation.platform_type === 'telegram' && conversation.platform_thread_id != null;
+
   switch (command) {
     case 'help':
+      if (isTelegramBusinessTopic) {
+        return {
+          success: true,
+          message: `Business Topic Commands:
+
+  /bind /absolute/path - Bind this topic to a filesystem path
+  /pwd - Show the currently bound path
+  /status - Show queue, session, and path state
+  /reset - Clear the active Codex session
+  /help - Show this help`,
+        };
+      }
       return {
         success: true,
         message: `Available Commands:
@@ -100,6 +116,29 @@ Session:
       };
 
     case 'status': {
+      if (isTelegramBusinessTopic && runtime) {
+        const runtimeState = runtime.lockManager.getConversationState(
+          conversation.platform_conversation_id
+        );
+        const activeSession = await sessionDb.getActiveSession(conversation.id);
+        const latestSession = activeSession ?? (await sessionDb.getLatestSession(conversation.id));
+        const lastOutcome = (latestSession?.metadata?.lastOutcome as string | undefined) ?? 'idle';
+
+        return {
+          success: true,
+          message: [
+            `Topic: ${conversation.topic_name ?? conversation.platform_thread_id}`,
+            `Path: ${conversation.cwd ?? 'Not set'}`,
+            `Current state: ${runtimeState.state}`,
+            `Queue length: ${runtimeState.queueLength}`,
+            `Last outcome: ${lastOutcome}`,
+            activeSession?.assistant_session_id
+              ? `Active session: ${activeSession.assistant_session_id}`
+              : 'Active session: none',
+          ].join('\n'),
+        };
+      }
+
       let msg = `Platform: ${conversation.platform_type}\nAI Assistant: ${conversation.ai_assistant_type}`;
 
       if (conversation.codebase_id) {
@@ -129,6 +168,34 @@ Session:
         success: true,
         message: `Current working directory: ${conversation.cwd || 'Not set'}`,
       };
+
+    case 'pwd':
+      return {
+        success: true,
+        message: `Current bound path: ${conversation.cwd || 'Not set'}`,
+      };
+
+    case 'bind': {
+      const nextPath = args.join(' ');
+
+      if (!nextPath || !isAbsolute(nextPath)) {
+        return { success: false, message: 'Usage: /bind /absolute/path' };
+      }
+
+      await mkdir(nextPath, { recursive: true });
+      await db.updateConversation(conversation.id, { cwd: nextPath });
+
+      const session = await sessionDb.getActiveSession(conversation.id);
+      if (session) {
+        await sessionDb.deactivateSession(session.id);
+      }
+
+      return {
+        success: true,
+        modified: true,
+        message: `Bound topic to: ${nextPath}\nPrevious Codex session reset.`,
+      };
+    }
 
     case 'setcwd': {
       if (args.length === 0) {

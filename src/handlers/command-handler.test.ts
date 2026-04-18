@@ -1,9 +1,58 @@
 /**
  * Unit tests for command handler
  */
-import { parseCommand } from './command-handler';
+jest.mock('fs/promises', () => ({
+  mkdir: jest.fn(),
+  readFile: jest.fn(),
+  writeFile: jest.fn(),
+  readdir: jest.fn(),
+  access: jest.fn(),
+}));
+
+jest.mock('../db/conversations', () => ({
+  updateConversation: jest.fn(),
+}));
+
+jest.mock('../db/sessions', () => ({
+  getActiveSession: jest.fn(),
+  getLatestSession: jest.fn(),
+  deactivateSession: jest.fn(),
+}));
+
+jest.mock('../db/codebases', () => ({
+  getCodebase: jest.fn(),
+  createCodebase: jest.fn(),
+  getCodebaseCommands: jest.fn(),
+  registerCommand: jest.fn(),
+  updateCodebaseCommands: jest.fn(),
+}));
+
+import { mkdir } from 'fs/promises';
+import { ConversationLockManager } from '../utils/conversation-lock';
+import * as conversationDb from '../db/conversations';
+import * as sessionDb from '../db/sessions';
+import type { Conversation } from '../types';
+import { handleCommand, parseCommand } from './command-handler';
 
 describe('CommandHandler', () => {
+  const baseConversation: Conversation = {
+    id: 'conv-1',
+    platform_type: 'telegram',
+    platform_conversation_id: 'telegram:-1001234567890:42',
+    platform_chat_id: '-1001234567890',
+    platform_thread_id: 42,
+    topic_name: 'repo-a',
+    codebase_id: null,
+    cwd: '/tmp/repo-a',
+    ai_assistant_type: 'codex',
+    created_at: new Date(),
+    updated_at: new Date(),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   describe('parseCommand', () => {
     test('should extract command and args from /clone command', () => {
       const result = parseCommand('/clone https://github.com/user/repo');
@@ -126,6 +175,56 @@ describe('CommandHandler', () => {
       expect(result.command).toBe('command-invoke');
       // Empty quotes get matched by \S+ and stripped, resulting in empty string
       expect(result.args).toEqual(['plan', '']);
+    });
+  });
+
+  describe('business topic commands', () => {
+    test('binds an absolute path and resets the current session', async () => {
+      (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({ id: 'session-1' });
+
+      const result = await handleCommand(baseConversation, '/bind /tmp/repo-b', {
+        lockManager: new ConversationLockManager(10),
+      });
+
+      expect(mkdir).toHaveBeenCalledWith('/tmp/repo-b', { recursive: true });
+      expect(conversationDb.updateConversation).toHaveBeenCalledWith('conv-1', {
+        cwd: '/tmp/repo-b',
+      });
+      expect(sessionDb.deactivateSession).toHaveBeenCalledWith('session-1');
+      expect(result.message).toContain('Bound topic to: /tmp/repo-b');
+    });
+
+    test('rejects relative bind targets', async () => {
+      const result = await handleCommand(baseConversation, '/bind repo-b', {
+        lockManager: new ConversationLockManager(10),
+      });
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Usage: /bind /absolute/path',
+      });
+    });
+
+    test('reports running state, queue length, and the latest session outcome', async () => {
+      const runtime = { lockManager: new ConversationLockManager(10) };
+      jest.spyOn(runtime.lockManager, 'getConversationState').mockReturnValue({
+        state: 'running',
+        isActive: true,
+        queueLength: 2,
+      });
+
+      (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({
+        id: 'session-1',
+        assistant_session_id: 'codex-thread-1',
+        metadata: { lastOutcome: 'completed' },
+      });
+
+      const result = await handleCommand(baseConversation, '/status', runtime);
+
+      expect(result.message).toContain('Topic: repo-a');
+      expect(result.message).toContain('Current state: running');
+      expect(result.message).toContain('Queue length: 2');
+      expect(result.message).toContain('Active session: codex-thread-1');
     });
   });
 });
