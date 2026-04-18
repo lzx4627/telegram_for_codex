@@ -1,6 +1,7 @@
 /**
  * Core type definitions for the Remote Coding Agent platform
  */
+import type { ConversationLockManager } from '../utils/conversation-lock';
 
 export interface Conversation {
   id: string;
@@ -59,6 +60,10 @@ export interface TelegramConversationContext {
   topicName: string | null;
   isGeneral: boolean;
   isBusinessTopic: boolean;
+}
+
+export interface RuntimeServices {
+  lockManager: ConversationLockManager;
 }
 
 /**
