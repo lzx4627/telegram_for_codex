@@ -29,14 +29,20 @@ describe('CodexClient', () => {
     expect(normalizeModelReasoningEffort('high')).toBe('high');
   });
 
-  test('builds codex options from provider base url and key env vars', () => {
+  test('builds codex options from explicit codex base url and codex api key env vars', () => {
     process.env.CODEX_BASE_URL = 'http://127.0.0.1:8080/v1';
-    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.CODEX_API_KEY = 'test-key';
 
     expect(buildCodexOptionsFromEnv()).toEqual({
       baseUrl: 'http://127.0.0.1:8080/v1',
       apiKey: 'test-key',
     });
+  });
+
+  test('does not remap OPENAI_API_KEY into SDK apiKey options', () => {
+    process.env.OPENAI_API_KEY = 'openai-style-key';
+
+    expect(buildCodexOptionsFromEnv()).toBeUndefined();
   });
 
   test('builds thread options with normalized reasoning effort', () => {

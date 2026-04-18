@@ -61,7 +61,7 @@ function extractConfigReasoningEffort(configText?: string): string | undefined {
 
 export function buildCodexOptionsFromEnv(): CodexOptions | undefined {
   const baseUrl = process.env.CODEX_BASE_URL ?? process.env.OPENAI_BASE_URL;
-  const apiKey = process.env.OPENAI_API_KEY ?? process.env.CODEX_API_KEY;
+  const apiKey = process.env.CODEX_API_KEY;
 
   if (!baseUrl && !apiKey) {
     return undefined;
