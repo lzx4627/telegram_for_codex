@@ -6,6 +6,9 @@ export interface Conversation {
   id: string;
   platform_type: string;
   platform_conversation_id: string;
+  platform_chat_id?: string | null;
+  platform_thread_id?: number | null;
+  topic_name?: string | null;
   codebase_id: string | null;
   cwd: string | null;
   ai_assistant_type: string;
@@ -42,6 +45,22 @@ export interface CommandResult {
   modified?: boolean; // Indicates if conversation state was modified
 }
 
+export interface PlatformMessageTarget {
+  conversationId: string;
+  chatId: string;
+  threadId: number | null;
+}
+
+export interface TelegramConversationContext {
+  platformType: 'telegram';
+  conversationId: string;
+  chatId: string;
+  threadId: number | null;
+  topicName: string | null;
+  isGeneral: boolean;
+  isBusinessTopic: boolean;
+}
+
 /**
  * Generic platform adapter interface
  * Allows supporting multiple platforms (Telegram, Slack, GitHub, etc.)
@@ -50,7 +69,7 @@ export interface IPlatformAdapter {
   /**
    * Send a message to the platform
    */
-  sendMessage(conversationId: string, message: string): Promise<void>;
+  sendMessage(target: string | PlatformMessageTarget, message: string): Promise<void>;
 
   /**
    * Get the configured streaming mode

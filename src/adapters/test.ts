@@ -2,7 +2,7 @@
  * Test adapter for validation
  * Exposes HTTP endpoints to send/receive messages for testing
  */
-import { IPlatformAdapter } from '../types';
+import { IPlatformAdapter, PlatformMessageTarget } from '../types';
 
 interface TestMessage {
   conversationId: string;
@@ -15,7 +15,8 @@ export class TestAdapter implements IPlatformAdapter {
   private messages = new Map<string, TestMessage[]>();
   private streamingMode: 'stream' | 'batch' = 'stream';
 
-  async sendMessage(conversationId: string, message: string): Promise<void> {
+  async sendMessage(target: string | PlatformMessageTarget, message: string): Promise<void> {
+    const conversationId = typeof target === 'string' ? target : target.conversationId;
     console.log(`[Test] Sending to ${conversationId}: ${message.substring(0, 100)}...`);
 
     if (!this.messages.has(conversationId)) {

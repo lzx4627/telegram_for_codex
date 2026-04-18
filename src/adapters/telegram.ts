@@ -3,7 +3,8 @@
  * Handles message sending with 4096 character limit splitting
  */
 import { Telegraf, Context } from 'telegraf';
-import { IPlatformAdapter } from '../types';
+import { IPlatformAdapter, PlatformMessageTarget, TelegramConversationContext } from '../types';
+import { getTelegramConversationContext } from './telegram-context';
 
 const MAX_LENGTH = 4096;
 
@@ -25,11 +26,24 @@ export class TelegramAdapter implements IPlatformAdapter {
    * Send a message to a Telegram chat
    * Automatically splits messages longer than 4096 characters
    */
-  async sendMessage(chatId: string, message: string): Promise<void> {
-    const id = parseInt(chatId);
+  async sendMessage(target: string | PlatformMessageTarget, message: string): Promise<void> {
+    const normalizedTarget =
+      typeof target === 'string'
+        ? {
+            conversationId: target,
+            chatId: target,
+            threadId: null,
+          }
+        : target;
+
+    const id = parseInt(normalizedTarget.chatId, 10);
+    const extra =
+      normalizedTarget.threadId == null
+        ? undefined
+        : { message_thread_id: normalizedTarget.threadId };
 
     if (message.length <= MAX_LENGTH) {
-      await this.bot.telegram.sendMessage(id, message);
+      await this.bot.telegram.sendMessage(id, message, extra);
     } else {
       // Split long messages by lines to preserve formatting
       const lines = message.split('\n');
@@ -39,7 +53,7 @@ export class TelegramAdapter implements IPlatformAdapter {
         // Reserve 100 chars for safety margin
         if (chunk.length + line.length + 1 > MAX_LENGTH - 100) {
           if (chunk) {
-            await this.bot.telegram.sendMessage(id, chunk);
+            await this.bot.telegram.sendMessage(id, chunk, extra);
           }
           chunk = line;
         } else {
@@ -49,7 +63,7 @@ export class TelegramAdapter implements IPlatformAdapter {
 
       // Send remaining chunk
       if (chunk) {
-        await this.bot.telegram.sendMessage(id, chunk);
+        await this.bot.telegram.sendMessage(id, chunk, extra);
       }
     }
   }
@@ -79,10 +93,25 @@ export class TelegramAdapter implements IPlatformAdapter {
    * Extract conversation ID from Telegram context
    */
   getConversationId(ctx: Context): string {
-    if (!ctx.chat) {
-      throw new Error('No chat in context');
-    }
-    return ctx.chat.id.toString();
+    return this.getConversationContext(ctx).conversationId;
+  }
+
+  /**
+   * Extract topic-aware Telegram conversation context.
+   */
+  getConversationContext(ctx: Context): TelegramConversationContext {
+    return getTelegramConversationContext(ctx);
+  }
+
+  /**
+   * Create a forum topic in a Telegram supergroup.
+   */
+  async createTopic(chatId: string, topicName: string): Promise<{ threadId: number; name: string }> {
+    const created = await this.bot.telegram.createForumTopic(parseInt(chatId, 10), topicName);
+    return {
+      threadId: created.message_thread_id,
+      name: created.name,
+    };
   }
 
   /**

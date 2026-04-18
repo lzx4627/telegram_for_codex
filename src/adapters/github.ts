@@ -4,7 +4,7 @@
  */
 import { Octokit } from '@octokit/rest';
 import { createHmac } from 'crypto';
-import { IPlatformAdapter } from '../types';
+import { IPlatformAdapter, PlatformMessageTarget } from '../types';
 import { handleMessage } from '../orchestrator/orchestrator';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
@@ -63,7 +63,8 @@ export class GitHubAdapter implements IPlatformAdapter {
   /**
    * Send a message to a GitHub issue or PR
    */
-  async sendMessage(conversationId: string, message: string): Promise<void> {
+  async sendMessage(target: string | PlatformMessageTarget, message: string): Promise<void> {
+    const conversationId = typeof target === 'string' ? target : target.conversationId;
     const parsed = this.parseConversationId(conversationId);
     if (!parsed) {
       console.error('[GitHub] Invalid conversationId:', conversationId);
