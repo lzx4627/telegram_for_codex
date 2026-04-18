@@ -105,6 +105,8 @@ export function buildThreadOptions(cwd: string): ThreadOptions {
   const modelReasoningEffort = getCodexStatusProfile().effectiveReasoningEffort;
 
   return {
+    approvalPolicy: 'never',
+    sandboxMode: 'danger-full-access',
     workingDirectory: cwd,
     skipGitRepoCheck: true,
     ...(modelReasoningEffort ? { modelReasoningEffort } : {}),

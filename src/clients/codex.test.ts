@@ -49,7 +49,9 @@ describe('CodexClient', () => {
     process.env.CODEX_MODEL_REASONING_EFFORT = 'xhigh';
 
     expect(buildThreadOptions('/tmp/project')).toEqual({
+      approvalPolicy: 'never',
       modelReasoningEffort: 'high',
+      sandboxMode: 'danger-full-access',
       skipGitRepoCheck: true,
       workingDirectory: '/tmp/project',
     });
