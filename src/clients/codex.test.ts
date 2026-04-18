@@ -4,6 +4,7 @@
 import {
   buildCodexOptionsFromEnv,
   buildThreadOptions,
+  formatResumeFallbackNotice,
   normalizeModelReasoningEffort,
 } from './codex';
 
@@ -55,5 +56,11 @@ describe('CodexClient', () => {
       skipGitRepoCheck: true,
       workingDirectory: '/tmp/project',
     });
+  });
+
+  test('formats a user-facing resume fallback notice', () => {
+    expect(formatResumeFallbackNotice('codex-thread-9')).toBe(
+      'Resume failed for recovered session codex-thread-9. Started a fresh session instead.'
+    );
   });
 });

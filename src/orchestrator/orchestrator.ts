@@ -107,6 +107,7 @@ async function handleTelegramTopicMessage(
         conversation_id: conversation.id,
         codebase_id: conversation.codebase_id || undefined,
         ai_assistant_type: 'codex',
+        cwd_snapshot: conversation.cwd,
       });
     }
 
@@ -238,6 +239,7 @@ async function handleLegacyMessage(
         conversation_id: conversation.id,
         codebase_id: conversation.codebase_id || undefined,
         ai_assistant_type: 'codex',
+        cwd_snapshot: cwd,
       });
     }
 

@@ -126,12 +126,17 @@ Session:
         const latestSession = activeSession ?? (await sessionDb.getLatestSession(conversation.id));
         const lastOutcome = (latestSession?.metadata?.lastOutcome as string | undefined) ?? 'idle';
         const profile = getCodexStatusProfile();
+        const resumeSource = (latestSession?.metadata?.resumeSource as string | undefined) ?? 'none';
+        const recoveredSession =
+          (latestSession?.metadata?.resumedFromAssistantSessionId as string | undefined) ?? 'none';
 
         return {
           success: true,
           message: [
             `Profile: ${profile.model} ${profile.configuredReasoningEffort} · ${conversation.cwd ?? 'Not set'}`,
             `Effective reasoning: ${profile.effectiveReasoningEffort}`,
+            `Resume source: ${resumeSource}`,
+            `Recovered session: ${recoveredSession}`,
             `Topic: ${conversation.topic_name ?? conversation.platform_thread_id}`,
             `Path: ${conversation.cwd ?? 'Not set'}`,
             `Current state: ${runtimeState.state}`,
@@ -193,6 +198,27 @@ Session:
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session) {
         await sessionDb.deactivateSession(session.id);
+      }
+
+      const restoredSession = await sessionDb.getLatestRestorableSessionByCwd(nextPath);
+      if (restoredSession?.assistant_session_id) {
+        await sessionDb.createSession({
+          conversation_id: conversation.id,
+          ai_assistant_type: 'codex',
+          assistant_session_id: restoredSession.assistant_session_id,
+          cwd_snapshot: nextPath,
+          metadata: {
+            resumeSource: 'cwd-history',
+            resumedFromAssistantSessionId: restoredSession.assistant_session_id,
+            resumedFromConversationId: restoredSession.conversation_id,
+          },
+        });
+
+        return {
+          success: true,
+          modified: true,
+          message: `Bound topic to: ${nextPath}\nRecovered historical session: ${restoredSession.assistant_session_id}\nResume source: machine-wide cwd history`,
+        };
       }
 
       return {

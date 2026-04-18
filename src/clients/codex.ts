@@ -42,6 +42,10 @@ export function normalizeModelReasoningEffort(
   return undefined;
 }
 
+export function formatResumeFallbackNotice(sessionId: string): string {
+  return `Resume failed for recovered session ${sessionId}. Started a fresh session instead.`;
+}
+
 function readCodexConfigToml(): string | undefined {
   try {
     return readFileSync(join(homedir(), '.codex', 'config.toml'), 'utf8');
@@ -148,6 +152,7 @@ export class CodexClient implements IAssistantClient {
     resumeSessionId?: string
   ): AsyncGenerator<MessageChunk> {
     const codex = await getCodex();
+    let resumeFallbackNotice: string | null = null;
 
     // Get or create thread (synchronous operations!)
     let thread;
@@ -159,6 +164,7 @@ export class CodexClient implements IAssistantClient {
         thread = codex.resumeThread(resumeSessionId, buildThreadOptions(cwd));
       } catch (error) {
         console.error(`[Codex] Failed to resume thread ${resumeSessionId}, creating new one:`, error);
+        resumeFallbackNotice = formatResumeFallbackNotice(resumeSessionId);
         // Fall back to creating new thread
         thread = codex.startThread(buildThreadOptions(cwd));
       }
@@ -169,6 +175,10 @@ export class CodexClient implements IAssistantClient {
     }
 
     try {
+      if (resumeFallbackNotice) {
+        yield { type: 'system', content: resumeFallbackNotice };
+      }
+
       // Run streamed query (this IS async)
       const result = await thread.runStreamed(prompt);
 

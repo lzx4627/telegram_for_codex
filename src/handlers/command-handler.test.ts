@@ -16,6 +16,8 @@ jest.mock('../db/conversations', () => ({
 jest.mock('../db/sessions', () => ({
   getActiveSession: jest.fn(),
   getLatestSession: jest.fn(),
+  getLatestRestorableSessionByCwd: jest.fn(),
+  createSession: jest.fn(),
   deactivateSession: jest.fn(),
 }));
 
@@ -201,6 +203,7 @@ describe('CommandHandler', () => {
   describe('business topic commands', () => {
     test('binds an absolute path and resets the current session', async () => {
       (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({ id: 'session-1' });
+      (sessionDb.getLatestRestorableSessionByCwd as jest.Mock).mockResolvedValue(null);
 
       const result = await handleCommand(baseConversation, '/bind /tmp/repo-b', {
         lockManager: new ConversationLockManager(10),
@@ -212,6 +215,34 @@ describe('CommandHandler', () => {
       });
       expect(sessionDb.deactivateSession).toHaveBeenCalledWith('session-1');
       expect(result.message).toContain('Bound topic to: /tmp/repo-b');
+    });
+
+    test('restores the latest machine-wide session for the bound cwd', async () => {
+      (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({ id: 'session-1' });
+      (sessionDb.getLatestRestorableSessionByCwd as jest.Mock).mockResolvedValue({
+        id: 'historic-row',
+        conversation_id: 'conv-9',
+        assistant_session_id: 'codex-thread-9',
+        metadata: {},
+      });
+
+      const result = await handleCommand(baseConversation, '/bind /tmp/repo-b', {
+        lockManager: new ConversationLockManager(10),
+      });
+
+      expect(sessionDb.createSession).toHaveBeenCalledWith({
+        conversation_id: 'conv-1',
+        ai_assistant_type: 'codex',
+        assistant_session_id: 'codex-thread-9',
+        cwd_snapshot: '/tmp/repo-b',
+        metadata: {
+          resumeSource: 'cwd-history',
+          resumedFromAssistantSessionId: 'codex-thread-9',
+          resumedFromConversationId: 'conv-9',
+        },
+      });
+      expect(result.message).toContain('Recovered historical session: codex-thread-9');
+      expect(result.message).toContain('Resume source: machine-wide cwd history');
     });
 
     test('rejects relative bind targets', async () => {
@@ -243,6 +274,8 @@ describe('CommandHandler', () => {
 
       expect(result.message).toContain('Profile: gpt-5.4 xhigh · /tmp/repo-a');
       expect(result.message).toContain('Effective reasoning: high');
+      expect(result.message).toContain('Resume source: none');
+      expect(result.message).toContain('Recovered session: none');
       expect(result.message).toContain('Topic: repo-a');
       expect(result.message).toContain('Current state: running');
       expect(result.message).toContain('Queue length: 2');

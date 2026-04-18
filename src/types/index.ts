@@ -34,6 +34,7 @@ export interface Session {
   codebase_id: string | null;
   ai_assistant_type: string;
   assistant_session_id: string | null;
+  cwd_snapshot?: string | null;
   active: boolean;
   metadata: Record<string, unknown>;
   started_at: Date;
