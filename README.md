@@ -4,6 +4,37 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 
 **Quick Start:** [Core Configuration](#1-core-configuration-required) • [AI Assistant Setup](#2-ai-assistant-setup-choose-at-least-one) • [Platform Setup](#3-platform-adapter-setup-choose-at-least-one) • [Start the App](#4-start-the-application) • [Usage Guide](#usage)
 
+## Telegram Forum Mode
+
+The current recommended setup is:
+
+- host machine runtime
+- Codex-only authentication via `codex login`
+- Telegram `supergroup + topics`
+- `General` as the control plane
+- one business topic per bound filesystem path
+
+### Telegram Forum Setup
+
+1. Create a Telegram bot with `@BotFather`
+2. Disable Privacy Mode so the bot can read ordinary group messages
+3. Add the bot to a supergroup with Topics enabled
+4. Run `codex login` on the host machine
+5. Start the app with `npm run dev`
+
+### General vs Business Topics
+
+- Mainline `General`: `/topic <name>`, `/topics`, `/help`
+- Business topics: `/bind /absolute/path`, `/pwd`, `/status`, `/reset`
+- Every ordinary text message in a business topic is sent to Codex
+
+### First Run
+
+1. In `General`, run `/topic repo-a`
+2. Open the new topic and run `/bind /tmp/repo-a`
+3. Send `create a README describing this folder`
+4. Confirm the bot streams output into that same topic
+
 ## Features
 
 - **Multi-Platform Support**: Interact via Telegram, GitHub issues/PRs, and more in the future
@@ -24,6 +55,11 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 - GitHub account (for repository cloning via `/clone` command)
 - At least one of: Claude Pro/Max subscription OR Codex account
 - At least one of: Telegram account OR GitHub account (for interaction)
+
+**Recommended for this branch:**
+- Telegram supergroup with Topics enabled
+- Bot privacy mode disabled
+- Codex login on the host machine
 
 ---
 
@@ -214,6 +250,8 @@ You must configure **at least one** platform to interact with your AI assistant.
 1. Message [@BotFather](https://t.me/BotFather) on Telegram
 2. Send `/newbot` and follow the prompts
 3. Copy the bot token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+4. Disable Privacy Mode with `/setprivacy` so the bot can see ordinary topic messages
+5. Add the bot to a Telegram supergroup with Topics enabled
 
 **Set environment variable:**
 
