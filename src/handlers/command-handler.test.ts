@@ -27,6 +27,14 @@ jest.mock('../db/codebases', () => ({
   updateCodebaseCommands: jest.fn(),
 }));
 
+jest.mock('../clients/codex', () => ({
+  getCodexStatusProfile: jest.fn(() => ({
+    model: 'gpt-5.4',
+    configuredReasoningEffort: 'xhigh',
+    effectiveReasoningEffort: 'high',
+  })),
+}));
+
 import { mkdir } from 'fs/promises';
 import { ConversationLockManager } from '../utils/conversation-lock';
 import * as conversationDb from '../db/conversations';
@@ -221,6 +229,8 @@ describe('CommandHandler', () => {
 
       const result = await handleCommand(baseConversation, '/status', runtime);
 
+      expect(result.message).toContain('Profile: gpt-5.4 xhigh · /tmp/repo-a');
+      expect(result.message).toContain('Effective reasoning: high');
       expect(result.message).toContain('Topic: repo-a');
       expect(result.message).toContain('Current state: running');
       expect(result.message).toContain('Queue length: 2');

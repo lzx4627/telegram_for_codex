@@ -59,6 +59,34 @@ function extractConfigReasoningEffort(configText?: string): string | undefined {
   return match?.[1];
 }
 
+function extractConfigModel(configText?: string): string | undefined {
+  if (!configText) {
+    return undefined;
+  }
+
+  const match = /^\s*model\s*=\s*"([^"]+)"/m.exec(configText);
+  return match?.[1];
+}
+
+export function getCodexStatusProfile(): {
+  model: string;
+  configuredReasoningEffort: string;
+  effectiveReasoningEffort: 'minimal' | 'low' | 'medium' | 'high';
+} {
+  const configText = readCodexConfigToml();
+  const model =
+    process.env.CODEX_MODEL ?? process.env.OPENAI_MODEL ?? extractConfigModel(configText) ?? 'unknown';
+  const configuredReasoningEffort =
+    process.env.CODEX_MODEL_REASONING_EFFORT ?? extractConfigReasoningEffort(configText) ?? 'medium';
+  const effectiveReasoningEffort = normalizeModelReasoningEffort(configuredReasoningEffort) ?? 'medium';
+
+  return {
+    model,
+    configuredReasoningEffort,
+    effectiveReasoningEffort,
+  };
+}
+
 export function buildCodexOptionsFromEnv(): CodexOptions | undefined {
   const baseUrl = process.env.CODEX_BASE_URL ?? process.env.OPENAI_BASE_URL;
   const apiKey = process.env.CODEX_API_KEY;
@@ -74,9 +102,7 @@ export function buildCodexOptionsFromEnv(): CodexOptions | undefined {
 }
 
 export function buildThreadOptions(cwd: string): ThreadOptions {
-  const rawReasoningEffort =
-    process.env.CODEX_MODEL_REASONING_EFFORT ?? extractConfigReasoningEffort(readCodexConfigToml());
-  const modelReasoningEffort = normalizeModelReasoningEffort(rawReasoningEffort);
+  const modelReasoningEffort = getCodexStatusProfile().effectiveReasoningEffort;
 
   return {
     workingDirectory: cwd,

@@ -10,6 +10,7 @@ import { Conversation, CommandResult, RuntimeServices } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
+import { getCodexStatusProfile } from '../clients/codex';
 
 const execAsync = promisify(exec);
 
@@ -123,10 +124,13 @@ Session:
         const activeSession = await sessionDb.getActiveSession(conversation.id);
         const latestSession = activeSession ?? (await sessionDb.getLatestSession(conversation.id));
         const lastOutcome = (latestSession?.metadata?.lastOutcome as string | undefined) ?? 'idle';
+        const profile = getCodexStatusProfile();
 
         return {
           success: true,
           message: [
+            `Profile: ${profile.model} ${profile.configuredReasoningEffort} · ${conversation.cwd ?? 'Not set'}`,
+            `Effective reasoning: ${profile.effectiveReasoningEffort}`,
             `Topic: ${conversation.topic_name ?? conversation.platform_thread_id}`,
             `Path: ${conversation.cwd ?? 'Not set'}`,
             `Current state: ${runtimeState.state}`,
