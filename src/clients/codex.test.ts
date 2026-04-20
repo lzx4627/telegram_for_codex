@@ -105,7 +105,7 @@ describe('CodexClient', () => {
 
     expect(findLatestGlobalSessionByCwd('/opt/github_trend_report', root)).toEqual({
       sessionId: 'session-new',
-      timestamp: '2026-04-18T10:21:53.699Z',
+      timestamp: '2026-04-18T10:21:53.719Z',
     });
 
     rmSync(root, { recursive: true, force: true });
@@ -155,6 +155,63 @@ describe('CodexClient', () => {
     expect(findLatestGlobalSessionByCwd('/opt/github_trend_report', root)).toEqual({
       sessionId: 'root-session',
       timestamp: '2026-04-18T10:00:00.000Z',
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('prefers the top-level session with the most recent activity, not the newest creation time', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codex-sessions-'));
+    const sessionDir = join(root, '2026', '04', '20');
+    mkdirSync(sessionDir, { recursive: true });
+
+    writeFileSync(
+      join(sessionDir, 'older-but-active.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-04-10T02:18:00.322Z',
+          type: 'session_meta',
+          payload: {
+            id: 'root-active',
+            timestamp: '2026-04-10T02:18:00.322Z',
+            cwd: '/opt/notebook',
+            source: 'cli',
+          },
+        }),
+        JSON.stringify({
+          timestamp: '2026-04-18T12:58:02.985Z',
+          type: 'task_complete',
+          payload: {},
+        }),
+      ].join('\n'),
+      'utf8'
+    );
+
+    writeFileSync(
+      join(sessionDir, 'newer-but-stale.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-04-15T09:55:46.746Z',
+          type: 'session_meta',
+          payload: {
+            id: 'root-stale',
+            timestamp: '2026-04-15T09:55:46.746Z',
+            cwd: '/opt/notebook',
+            source: 'cli',
+          },
+        }),
+        JSON.stringify({
+          timestamp: '2026-04-15T09:59:59.792Z',
+          type: 'task_complete',
+          payload: {},
+        }),
+      ].join('\n'),
+      'utf8'
+    );
+
+    expect(findLatestGlobalSessionByCwd('/opt/notebook', root)).toEqual({
+      sessionId: 'root-active',
+      timestamp: '2026-04-18T12:58:02.985Z',
     });
 
     rmSync(root, { recursive: true, force: true });

@@ -92,6 +92,8 @@ export function findLatestGlobalSessionByCwd(
       }
 
       try {
+        const lastLine = lines[lines.length - 1];
+        const lastEvent = lastLine ? JSON.parse(lastLine) as { timestamp?: string } : undefined;
         const parsed = JSON.parse(sessionMetaLine) as {
           payload?: {
             id?: string;
@@ -113,7 +115,7 @@ export function findLatestGlobalSessionByCwd(
         ) {
           const candidate = {
             sessionId: parsed.payload.id,
-            timestamp: parsed.payload.timestamp,
+            timestamp: lastEvent?.timestamp ?? parsed.payload.timestamp,
           };
 
           if (!latestAny || candidate.timestamp > latestAny.timestamp) {
