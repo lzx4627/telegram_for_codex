@@ -6,11 +6,15 @@ import { readFile } from 'fs/promises';
 import { join } from 'path';
 import {
   IPlatformAdapter,
+  PlatformMessageTarget,
   RuntimeServices,
   TelegramConversationContext,
   Session,
 } from '../types';
-import { getTelegramMessageTarget } from '../adapters/telegram-context';
+import {
+  buildTelegramConversationId,
+  getTelegramMessageTarget,
+} from '../adapters/telegram-context';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
@@ -135,6 +139,10 @@ async function handleTelegramTopicMessage(
       lastFinishedAt: new Date().toISOString(),
     });
     await platform.sendMessage(target, '[system] completed');
+    await platform.sendMessage(
+      buildGeneralNotificationTarget(context),
+      formatCompletionNotification(context, conversation.cwd)
+    );
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Unknown error';
 
@@ -148,6 +156,37 @@ async function handleTelegramTopicMessage(
 
     await platform.sendMessage(target, `[system] failed: ${messageText}`);
   }
+}
+
+function buildGeneralNotificationTarget(
+  context: TelegramConversationContext
+): PlatformMessageTarget {
+  return {
+    conversationId: buildTelegramConversationId(context.chatId, null),
+    chatId: context.chatId,
+    threadId: null,
+  };
+}
+
+function formatCompletionNotification(
+  context: TelegramConversationContext,
+  cwd: string
+): string {
+  const label = context.topicName ?? `thread-${context.threadId}`;
+  const timestamp = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+    .format(new Date())
+    .replace(',', '');
+
+  return `[completed] ${label} · ${cwd} · ${timestamp} Asia/Shanghai`;
 }
 
 async function handleLegacyMessage(

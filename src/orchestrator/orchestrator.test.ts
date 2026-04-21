@@ -120,6 +120,14 @@ describe('orchestrator', () => {
       'session-1',
       expect.objectContaining({ lastOutcome: 'completed' })
     );
+    expect(platform.sendMessage).toHaveBeenCalledWith(
+      {
+        conversationId: 'telegram:-1001234567890:general',
+        chatId: '-1001234567890',
+        threadId: null,
+      },
+      expect.stringContaining('[completed] repo-a · /tmp/repo-a ·')
+    );
   });
 
   test('records failed status when Codex throws', async () => {
@@ -175,6 +183,10 @@ describe('orchestrator', () => {
     expect(platform.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ threadId: 42 }),
       '[system] failed: codex exploded'
+    );
+    expect(platform.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: null }),
+      expect.stringContaining('[completed]')
     );
   });
 });
