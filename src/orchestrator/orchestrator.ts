@@ -3,7 +3,7 @@
  * Routes slash commands and AI messages appropriately
  */
 import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { basename, join } from 'path';
 import {
   IPlatformAdapter,
   PlatformMessageTarget,
@@ -141,7 +141,7 @@ async function handleTelegramTopicMessage(
     await platform.sendMessage(target, '[system] completed');
     await platform.sendMessage(
       buildGeneralNotificationTarget(context),
-      formatCompletionNotification(context, conversation.cwd)
+      formatCompletionNotification(context, conversation)
     );
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Unknown error';
@@ -170,9 +170,10 @@ function buildGeneralNotificationTarget(
 
 function formatCompletionNotification(
   context: TelegramConversationContext,
-  cwd: string
+  conversation: { topic_name?: string | null; cwd?: string | null }
 ): string {
-  const label = context.topicName ?? `thread-${context.threadId}`;
+  const cwd = conversation.cwd ?? 'unknown-path';
+  const label = resolveCompletionLabel(context, conversation);
   const timestamp = new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
@@ -186,7 +187,26 @@ function formatCompletionNotification(
     .format(new Date())
     .replace(',', '');
 
-  return `[completed] ${label} · ${cwd} · ${timestamp} Asia/Shanghai`;
+  return `任务完成：${label} · ${cwd} · ${timestamp} Asia/Shanghai`;
+}
+
+function resolveCompletionLabel(
+  context: TelegramConversationContext,
+  conversation: { topic_name?: string | null; cwd?: string | null }
+): string {
+  if (context.topicName) {
+    return context.topicName;
+  }
+
+  if (conversation.topic_name) {
+    return conversation.topic_name;
+  }
+
+  if (conversation.cwd) {
+    return basename(conversation.cwd);
+  }
+
+  return `thread-${context.threadId}`;
 }
 
 async function handleLegacyMessage(

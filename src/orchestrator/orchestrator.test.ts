@@ -126,7 +126,170 @@ describe('orchestrator', () => {
         chatId: '-1001234567890',
         threadId: null,
       },
-      expect.stringContaining('[completed] repo-a · /tmp/repo-a ·')
+      expect.stringContaining('任务完成：repo-a · /tmp/repo-a ·')
+    );
+  });
+
+  test('uses the friendly Chinese completion copy with the current topic name', async () => {
+    (conversationDb.getOrCreateConversation as jest.Mock).mockResolvedValue({
+      id: 'conv-1',
+      platform_type: 'telegram',
+      platform_conversation_id: 'telegram:-1001234567890:42',
+      platform_chat_id: '-1001234567890',
+      platform_thread_id: 42,
+      topic_name: '知识流系统',
+      codebase_id: null,
+      cwd: '/opt/notebook',
+      ai_assistant_type: 'codex',
+    });
+
+    (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({
+      id: 'session-1',
+      assistant_session_id: null,
+      metadata: {},
+    });
+
+    (getAssistantClient as jest.Mock).mockReturnValue({
+      sendQuery: async function* () {
+        yield { type: 'assistant', content: 'OK' };
+        yield { type: 'result', sessionId: 'codex-thread-1' };
+      },
+    });
+
+    const platform = {
+      sendMessage: jest.fn(),
+      getStreamingMode: () => 'stream' as const,
+      getPlatformType: () => 'telegram',
+    };
+
+    await handleMessage(
+      platform as never,
+      {
+        platformType: 'telegram',
+        conversationId: 'telegram:-1001234567890:42',
+        chatId: '-1001234567890',
+        threadId: 42,
+        topicName: '知识流系统',
+        isGeneral: false,
+        isBusinessTopic: true,
+      },
+      'finish it',
+      { lockManager: new ConversationLockManager(10) }
+    );
+
+    expect(platform.sendMessage).toHaveBeenCalledWith(
+      {
+        conversationId: 'telegram:-1001234567890:general',
+        chatId: '-1001234567890',
+        threadId: null,
+      },
+      expect.stringContaining('任务完成：知识流系统 · /opt/notebook ·')
+    );
+  });
+
+  test('uses the stored conversation topic name when the live context has none', async () => {
+    (conversationDb.getOrCreateConversation as jest.Mock).mockResolvedValue({
+      id: 'conv-1',
+      platform_type: 'telegram',
+      platform_conversation_id: 'telegram:-1001234567890:42',
+      platform_chat_id: '-1001234567890',
+      platform_thread_id: 42,
+      topic_name: '知识流系统',
+      codebase_id: null,
+      cwd: '/opt/notebook',
+      ai_assistant_type: 'codex',
+    });
+
+    (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({
+      id: 'session-1',
+      assistant_session_id: null,
+      metadata: {},
+    });
+
+    (getAssistantClient as jest.Mock).mockReturnValue({
+      sendQuery: async function* () {
+        yield { type: 'assistant', content: 'OK' };
+        yield { type: 'result', sessionId: 'codex-thread-1' };
+      },
+    });
+
+    const platform = {
+      sendMessage: jest.fn(),
+      getStreamingMode: () => 'stream' as const,
+      getPlatformType: () => 'telegram',
+    };
+
+    await handleMessage(
+      platform as never,
+      {
+        platformType: 'telegram',
+        conversationId: 'telegram:-1001234567890:42',
+        chatId: '-1001234567890',
+        threadId: 42,
+        topicName: null,
+        isGeneral: false,
+        isBusinessTopic: true,
+      },
+      'finish it',
+      { lockManager: new ConversationLockManager(10) }
+    );
+
+    expect(platform.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: null }),
+      expect.stringContaining('任务完成：知识流系统 · /opt/notebook ·')
+    );
+  });
+
+  test('falls back to the cwd basename before thread id', async () => {
+    (conversationDb.getOrCreateConversation as jest.Mock).mockResolvedValue({
+      id: 'conv-1',
+      platform_type: 'telegram',
+      platform_conversation_id: 'telegram:-1001234567890:42',
+      platform_chat_id: '-1001234567890',
+      platform_thread_id: 42,
+      topic_name: null,
+      codebase_id: null,
+      cwd: '/opt/notebook',
+      ai_assistant_type: 'codex',
+    });
+
+    (sessionDb.getActiveSession as jest.Mock).mockResolvedValue({
+      id: 'session-1',
+      assistant_session_id: null,
+      metadata: {},
+    });
+
+    (getAssistantClient as jest.Mock).mockReturnValue({
+      sendQuery: async function* () {
+        yield { type: 'assistant', content: 'OK' };
+        yield { type: 'result', sessionId: 'codex-thread-1' };
+      },
+    });
+
+    const platform = {
+      sendMessage: jest.fn(),
+      getStreamingMode: () => 'stream' as const,
+      getPlatformType: () => 'telegram',
+    };
+
+    await handleMessage(
+      platform as never,
+      {
+        platformType: 'telegram',
+        conversationId: 'telegram:-1001234567890:42',
+        chatId: '-1001234567890',
+        threadId: 42,
+        topicName: null,
+        isGeneral: false,
+        isBusinessTopic: true,
+      },
+      'finish it',
+      { lockManager: new ConversationLockManager(10) }
+    );
+
+    expect(platform.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: null }),
+      expect.stringContaining('任务完成：notebook · /opt/notebook ·')
     );
   });
 
