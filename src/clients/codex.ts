@@ -2,9 +2,9 @@
  * Codex SDK wrapper
  * Provides async generator interface for streaming Codex responses
  */
-import { Dirent, readFileSync, readdirSync } from 'fs';
+import { Dirent, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { IAssistantClient, MessageChunk } from '../types';
 
 // Type definition for Codex SDK (ESM import)
@@ -12,6 +12,8 @@ type CodexSDK = typeof import('@openai/codex-sdk');
 type Codex = InstanceType<CodexSDK['Codex']>;
 type CodexOptions = ConstructorParameters<CodexSDK['Codex']>[0];
 type ThreadOptions = Parameters<Codex['startThread']>[0];
+type ThreadEvent = import('@openai/codex-sdk').ThreadEvent;
+type RunStreamedEvents = AsyncGenerator<ThreadEvent>;
 
 // Singleton Codex instance
 let codexInstance: Codex | null = null;
@@ -22,10 +24,16 @@ let codexClass: CodexSDK['Codex'] | null = null;
 // eslint-disable-next-line @typescript-eslint/no-implied-eval
 const importDynamic = new Function('modulePath', 'return import(modulePath)');
 const SUPPORTED_REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
+const SUPPORTED_CODEX_MODELS = new Set(['gpt-5.5', 'gpt-5.4']);
+const DEFAULT_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
+const DEFAULT_MAX_DURATION_MS = 60 * 60 * 1000;
+
+type SupportedReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+type SupportedCodexModel = 'gpt-5.5' | 'gpt-5.4';
 
 export function normalizeModelReasoningEffort(
   value?: string | null
-): 'minimal' | 'low' | 'medium' | 'high' | undefined {
+): SupportedReasoningEffort | undefined {
   if (!value) {
     return undefined;
   }
@@ -36,7 +44,20 @@ export function normalizeModelReasoningEffort(
   }
 
   if (SUPPORTED_REASONING_EFFORTS.has(normalized)) {
-    return normalized as 'minimal' | 'low' | 'medium' | 'high';
+    return normalized as SupportedReasoningEffort;
+  }
+
+  return undefined;
+}
+
+export function normalizeCodexModel(value?: string | null): SupportedCodexModel | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (SUPPORTED_CODEX_MODELS.has(normalized)) {
+    return normalized as SupportedCodexModel;
   }
 
   return undefined;
@@ -44,6 +65,51 @@ export function normalizeModelReasoningEffort(
 
 export function formatResumeFallbackNotice(sessionId: string): string {
   return `Resume failed for recovered session ${sessionId}. Started a fresh session instead.`;
+}
+
+export function formatCodexTimeoutMessage(kind: 'idle' | 'total', timeoutMs: number): string {
+  const seconds = Math.floor(timeoutMs / 1000);
+  if (kind === 'idle') {
+    return `Codex stream timed out after ${seconds}s without events.`;
+  }
+
+  return `Codex stream exceeded the ${seconds}s maximum duration.`;
+}
+
+export function getCodexTimeoutConfig(): {
+  idleTimeoutMs: number;
+  maxDurationMs: number;
+} {
+  const idleTimeoutMs = Number(process.env.CODEX_STREAM_IDLE_TIMEOUT_MS || DEFAULT_IDLE_TIMEOUT_MS);
+  const maxDurationMs = Number(process.env.CODEX_STREAM_MAX_DURATION_MS || DEFAULT_MAX_DURATION_MS);
+
+  return {
+    idleTimeoutMs: Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0 ? idleTimeoutMs : DEFAULT_IDLE_TIMEOUT_MS,
+    maxDurationMs:
+      Number.isFinite(maxDurationMs) && maxDurationMs > 0 ? maxDurationMs : DEFAULT_MAX_DURATION_MS,
+  };
+}
+
+async function nextThreadEventWithTimeout(
+  events: RunStreamedEvents,
+  timeoutMs: number
+): Promise<IteratorResult<ThreadEvent>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      events.next() as Promise<IteratorResult<ThreadEvent>>,
+      new Promise<IteratorResult<ThreadEvent>>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Codex stream timeout'));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 export function findLatestGlobalSessionByCwd(
@@ -138,12 +204,21 @@ export function findLatestGlobalSessionByCwd(
   return latestTopLevel ?? latestAny;
 }
 
-function readCodexConfigToml(): string | undefined {
+function getCodexConfigPath(): string {
+  return join(homedir(), '.codex', 'config.toml');
+}
+
+function readCodexConfigToml(configPath = getCodexConfigPath()): string | undefined {
   try {
-    return readFileSync(join(homedir(), '.codex', 'config.toml'), 'utf8');
+    return readFileSync(configPath, 'utf8');
   } catch {
     return undefined;
   }
+}
+
+function getNonEmptyEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value ? value : undefined;
 }
 
 function extractConfigReasoningEffort(configText?: string): string | undefined {
@@ -167,19 +242,63 @@ function extractConfigModel(configText?: string): string | undefined {
 export function getCodexStatusProfile(): {
   model: string;
   configuredReasoningEffort: string;
-  effectiveReasoningEffort: 'minimal' | 'low' | 'medium' | 'high';
+  effectiveReasoningEffort: SupportedReasoningEffort;
 } {
   const configText = readCodexConfigToml();
   const model =
-    process.env.CODEX_MODEL ?? process.env.OPENAI_MODEL ?? extractConfigModel(configText) ?? 'unknown';
+    getNonEmptyEnv('CODEX_MODEL') ?? getNonEmptyEnv('OPENAI_MODEL') ?? extractConfigModel(configText) ?? 'unknown';
   const configuredReasoningEffort =
-    process.env.CODEX_MODEL_REASONING_EFFORT ?? extractConfigReasoningEffort(configText) ?? 'medium';
+    getNonEmptyEnv('CODEX_MODEL_REASONING_EFFORT') ?? extractConfigReasoningEffort(configText) ?? 'medium';
   const effectiveReasoningEffort = normalizeModelReasoningEffort(configuredReasoningEffort) ?? 'medium';
 
   return {
     model,
     configuredReasoningEffort,
     effectiveReasoningEffort,
+  };
+}
+
+function upsertTomlStringValue(configText: string, key: string, value: string): string {
+  const line = `${key} = "${value}"`;
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*"[^"]*"\\s*$`, 'm');
+
+  if (pattern.test(configText)) {
+    return configText.replace(pattern, line);
+  }
+
+  const prefix = configText.trimEnd();
+  return `${prefix ? `${prefix}\n` : ''}${line}\n`;
+}
+
+export function updateCodexConfigProfile(
+  update: { model?: SupportedCodexModel; reasoningEffort?: SupportedReasoningEffort },
+  configPath = getCodexConfigPath()
+): {
+  model: string;
+  configuredReasoningEffort: string;
+  effectiveReasoningEffort: SupportedReasoningEffort;
+} {
+  let configText = readCodexConfigToml(configPath) ?? '';
+
+  if (update.model) {
+    configText = upsertTomlStringValue(configText, 'model', update.model);
+  }
+
+  if (update.reasoningEffort) {
+    configText = upsertTomlStringValue(configText, 'model_reasoning_effort', update.reasoningEffort);
+  }
+
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, configText, 'utf8');
+
+  const model = update.model ?? extractConfigModel(configText) ?? 'unknown';
+  const configuredReasoningEffort =
+    update.reasoningEffort ?? extractConfigReasoningEffort(configText) ?? 'medium';
+
+  return {
+    model,
+    configuredReasoningEffort,
+    effectiveReasoningEffort: normalizeModelReasoningEffort(configuredReasoningEffort) ?? 'medium',
   };
 }
 
@@ -198,13 +317,16 @@ export function buildCodexOptionsFromEnv(): CodexOptions | undefined {
 }
 
 export function buildThreadOptions(cwd: string): ThreadOptions {
-  const modelReasoningEffort = getCodexStatusProfile().effectiveReasoningEffort;
+  const profile = getCodexStatusProfile();
+  const modelReasoningEffort = profile.effectiveReasoningEffort;
+  const model = normalizeCodexModel(profile.model);
 
   return {
     approvalPolicy: 'never',
     sandboxMode: 'danger-full-access',
     workingDirectory: cwd,
     skipGitRepoCheck: true,
+    ...(model ? { model } : {}),
     ...(modelReasoningEffort ? { modelReasoningEffort } : {}),
   };
 }
@@ -245,6 +367,9 @@ export class CodexClient implements IAssistantClient {
   ): AsyncGenerator<MessageChunk> {
     const codex = await getCodex();
     let resumeFallbackNotice: string | null = null;
+    const timeoutConfig = getCodexTimeoutConfig();
+    const startedAt = Date.now();
+    let lastEventAt = startedAt;
 
     // Get or create thread (synchronous operations!)
     let thread;
@@ -273,9 +398,56 @@ export class CodexClient implements IAssistantClient {
 
       // Run streamed query (this IS async)
       const result = await thread.runStreamed(prompt);
+      const events = result.events as RunStreamedEvents;
 
       // Process streaming events
-      for await (const event of result.events) {
+      while (true) {
+        const now = Date.now();
+        const idleRemaining = timeoutConfig.idleTimeoutMs - (now - lastEventAt);
+        const totalRemaining = timeoutConfig.maxDurationMs - (now - startedAt);
+
+        if (idleRemaining <= 0) {
+          const message = formatCodexTimeoutMessage('idle', timeoutConfig.idleTimeoutMs);
+          yield { type: 'system', content: `⚠️ ${message}` };
+          throw new Error(message);
+        }
+
+        if (totalRemaining <= 0) {
+          const message = formatCodexTimeoutMessage('total', timeoutConfig.maxDurationMs);
+          yield { type: 'system', content: `⚠️ ${message}` };
+          throw new Error(message);
+        }
+
+        let nextResult: IteratorResult<ThreadEvent>;
+        try {
+          nextResult = await nextThreadEventWithTimeout(
+            events,
+            Math.min(idleRemaining, totalRemaining)
+          );
+        } catch (error) {
+          if ((error as Error).message !== 'Codex stream timeout') {
+            throw error;
+          }
+
+          await events.return?.(undefined);
+          const current = Date.now();
+          const idleExceeded = current - lastEventAt >= timeoutConfig.idleTimeoutMs;
+          const totalExceeded = current - startedAt >= timeoutConfig.maxDurationMs;
+          const message = idleExceeded
+            ? formatCodexTimeoutMessage('idle', timeoutConfig.idleTimeoutMs)
+            : formatCodexTimeoutMessage('total', timeoutConfig.maxDurationMs);
+
+          yield { type: 'system', content: `⚠️ ${message}` };
+          throw idleExceeded || totalExceeded ? new Error(message) : error;
+        }
+
+        if (nextResult.done) {
+          break;
+        }
+
+        lastEventAt = Date.now();
+        const event = nextResult.value;
+
         // Handle error events
         if (event.type === 'error') {
           console.error('[Codex] Stream error:', event.message);

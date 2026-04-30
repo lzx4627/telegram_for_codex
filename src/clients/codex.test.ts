@@ -6,10 +6,13 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   buildCodexOptionsFromEnv,
+  formatCodexTimeoutMessage,
   buildThreadOptions,
   findLatestGlobalSessionByCwd,
   formatResumeFallbackNotice,
+  getCodexTimeoutConfig,
   normalizeModelReasoningEffort,
+  updateCodexConfigProfile,
 } from './codex';
 
 describe('CodexClient', () => {
@@ -52,9 +55,11 @@ describe('CodexClient', () => {
 
   test('builds thread options with normalized reasoning effort', () => {
     process.env.CODEX_MODEL_REASONING_EFFORT = 'xhigh';
+    process.env.CODEX_MODEL = 'gpt-5.5';
 
     expect(buildThreadOptions('/tmp/project')).toEqual({
       approvalPolicy: 'never',
+      model: 'gpt-5.5',
       modelReasoningEffort: 'high',
       sandboxMode: 'danger-full-access',
       skipGitRepoCheck: true,
@@ -66,6 +71,57 @@ describe('CodexClient', () => {
     expect(formatResumeFallbackNotice('codex-thread-9')).toBe(
       'Resume failed for recovered session codex-thread-9. Started a fresh session instead.'
     );
+  });
+
+  test('uses sane default stream timeout settings', () => {
+    delete process.env.CODEX_STREAM_IDLE_TIMEOUT_MS;
+    delete process.env.CODEX_STREAM_MAX_DURATION_MS;
+
+    expect(getCodexTimeoutConfig()).toEqual({
+      idleTimeoutMs: 180000,
+      maxDurationMs: 3600000,
+    });
+  });
+
+  test('allows stream timeout settings to be overridden from env', () => {
+    process.env.CODEX_STREAM_IDLE_TIMEOUT_MS = '90000';
+    process.env.CODEX_STREAM_MAX_DURATION_MS = '1200000';
+
+    expect(getCodexTimeoutConfig()).toEqual({
+      idleTimeoutMs: 90000,
+      maxDurationMs: 1200000,
+    });
+  });
+
+  test('formats timeout messages for idle and total duration guards', () => {
+    expect(formatCodexTimeoutMessage('idle', 180000)).toBe(
+      'Codex stream timed out after 180s without events.'
+    );
+    expect(formatCodexTimeoutMessage('total', 3600000)).toBe(
+      'Codex stream exceeded the 3600s maximum duration.'
+    );
+  });
+
+  test('updates model and reasoning in a Codex config toml file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codex-config-'));
+    const configPath = join(root, 'config.toml');
+    writeFileSync(configPath, 'model = "gpt-5.4"\nmodel_reasoning_effort = "high"\n', 'utf8');
+
+    const profile = updateCodexConfigProfile(
+      {
+        model: 'gpt-5.5',
+        reasoningEffort: 'medium',
+      },
+      configPath
+    );
+
+    expect(profile).toEqual({
+      model: 'gpt-5.5',
+      configuredReasoningEffort: 'medium',
+      effectiveReasoningEffort: 'medium',
+    });
+
+    rmSync(root, { recursive: true, force: true });
   });
 
   test('finds the latest global codex session by cwd from ~/.codex/sessions layout', () => {

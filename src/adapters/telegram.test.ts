@@ -84,6 +84,7 @@ describe('TelegramAdapter', () => {
         { command: 'help', description: 'Show available commands' },
         { command: 'topic', description: 'Create a new business topic from General' },
         { command: 'topics', description: 'List business topics and bound paths' },
+        { command: 'model', description: 'Show or set Codex model and reasoning' },
         { command: 'bind', description: 'Bind the current topic to an absolute path' },
         { command: 'pwd', description: 'Show the current bound path' },
         { command: 'status', description: 'Show queue and session state' },
